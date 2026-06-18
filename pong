@@ -1,0 +1,204 @@
+import tkinter as tk
+import random
+import math
+
+# ----------------------------
+# Game Constants
+# ----------------------------
+WIDTH, HEIGHT = 800, 600
+PADDLE_WIDTH = 12
+PADDLE_HEIGHT = 100
+BALL_SIZE = 16
+BASE_BALL_SPEED = 5
+MAX_BALL_SPEED = 15
+SPEED_INCREMENT = 1.05
+PADDLE_SPEED = 6
+AI_SPEED = PADDLE_SPEED
+WINNING_SCORE = 7
+
+# Colors
+BG_COLOR = "black"
+PADDLE_COLOR = "white"
+BALL_COLOR = "white"
+TEXT_COLOR = "white"
+
+
+class Ball:
+    def __init__(self, canvas):
+        self.canvas = canvas
+        self.id = canvas.create_oval(0, 0, BALL_SIZE, BALL_SIZE, fill=BALL_COLOR)
+        self.canvas.move(self.id, WIDTH//2 - BALL_SIZE//2, HEIGHT//2 - BALL_SIZE//2)
+        self.reset()
+
+    def reset(self):
+        self.canvas.coords(self.id, WIDTH//2 - BALL_SIZE//2, HEIGHT//2 - BALL_SIZE//2,
+                           WIDTH//2 + BALL_SIZE//2, HEIGHT//2 + BALL_SIZE//2)
+        self.speed = BASE_BALL_SPEED
+        self.dx = random.choice([-1, 1]) * self.speed
+        self.dy = random.choice([-1, 1]) * self.speed
+
+    def accelerate(self):
+        self.speed = min(self.speed * SPEED_INCREMENT, MAX_BALL_SPEED)
+        mag = math.hypot(self.dx, self.dy)
+        if mag == 0:
+            return
+        self.dx = (self.dx / mag) * self.speed
+        self.dy = (self.dy / mag) * self.speed
+
+    def move(self):
+        self.canvas.move(self.id, self.dx, self.dy)
+        pos = self.canvas.coords(self.id)
+        if pos[1] <= 0 or pos[3] >= HEIGHT:
+            self.dy = -self.dy
+        return pos
+
+    def get_pos(self):
+        return self.canvas.coords(self.id)
+
+
+class Paddle:
+    def __init__(self, canvas, x, y, color=PADDLE_COLOR):
+        self.canvas = canvas
+        self.id = canvas.create_rectangle(x, y, x + PADDLE_WIDTH, y + PADDLE_HEIGHT,
+                                          fill=color)
+        self.y = y
+
+    def move(self, dy):
+        self.canvas.move(self.id, 0, dy)
+        self.y += dy
+        pos = self.canvas.coords(self.id)
+        if pos[1] < 0:
+            self.canvas.move(self.id, 0, -pos[1])
+            self.y -= pos[1]
+        elif pos[3] > HEIGHT:
+            self.canvas.move(self.id, 0, HEIGHT - pos[3])
+            self.y += HEIGHT - pos[3]
+
+    def get_pos(self):
+        return self.canvas.coords(self.id)
+
+    def get_center_y(self):
+        pos = self.get_pos()
+        return (pos[1] + pos[3]) / 2
+
+
+class PongGame:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Ping‑Pong with Acceleration")
+        self.root.resizable(False, False)
+
+        self.canvas = tk.Canvas(root, width=WIDTH, height=HEIGHT, bg=BG_COLOR)
+        self.canvas.pack()
+
+        self.score_left = 0
+        self.score_right = 0
+        self.score_text = self.canvas.create_text(WIDTH//2, 40, text="0 - 0",
+                                                  fill=TEXT_COLOR, font=("Arial", 24))
+
+        self.ball = Ball(self.canvas)
+        self.player = Paddle(self.canvas, 30, HEIGHT//2 - PADDLE_HEIGHT//2)
+        self.ai = Paddle(self.canvas, WIDTH - 30 - PADDLE_WIDTH, HEIGHT//2 - PADDLE_HEIGHT//2)
+
+        self.root.bind("w", self.player_move_up)
+        self.root.bind("s", self.player_move_down)
+        self.root.bind("<KeyPress-w>", self.player_move_up)
+        self.root.bind("<KeyPress-s>", self.player_move_down)
+        self.root.bind("<KeyRelease-w>", self.stop_player)
+        self.root.bind("<KeyRelease-s>", self.stop_player)
+
+        self.player_dy = 0
+        self.running = True
+        self.update_loop()
+
+    def player_move_up(self, event):
+        self.player_dy = -PADDLE_SPEED
+
+    def player_move_down(self, event):
+        self.player_dy = PADDLE_SPEED
+
+    def stop_player(self, event):
+        self.player_dy = 0
+
+    def ai_move(self):
+        ball_y = self.ball.get_pos()[1] + BALL_SIZE//2
+        ai_y = self.ai.get_center_y()
+        diff = ball_y - ai_y
+        if abs(diff) > 10:
+            step = AI_SPEED if diff > 0 else -AI_SPEED   # now AI_SPEED = PADDLE_SPEED
+            self.ai.move(step)
+
+    def check_collision(self):
+        ball_pos = self.ball.get_pos()
+        ball_x1, ball_y1, ball_x2, ball_y2 = ball_pos
+
+        player_pos = self.player.get_pos()
+        if (ball_x1 <= player_pos[2] and ball_x2 >= player_pos[0] and
+            ball_y1 <= player_pos[3] and ball_y2 >= player_pos[1]):
+            self.ball.dx = abs(self.ball.dx)
+            offset = (ball_y1 + ball_y2)/2 - (player_pos[1] + player_pos[3])/2
+            self.ball.dy = offset * 0.1
+            self.ball.accelerate()
+
+        ai_pos = self.ai.get_pos()
+        if (ball_x2 >= ai_pos[0] and ball_x1 <= ai_pos[2] and
+            ball_y1 <= ai_pos[3] and ball_y2 >= ai_pos[1]):
+            self.ball.dx = -abs(self.ball.dx)
+            offset = (ball_y1 + ball_y2)/2 - (ai_pos[1] + ai_pos[3])/2
+            self.ball.dy = offset * 0.1
+            self.ball.accelerate()
+
+    def check_score(self):
+        ball_pos = self.ball.get_pos()
+        if ball_pos[0] < 0:
+            self.score_right += 1
+            self.update_score()
+            self.ball.reset()
+        elif ball_pos[2] > WIDTH:
+            self.score_left += 1
+            self.update_score()
+            self.ball.reset()
+
+        if self.score_left >= WINNING_SCORE or self.score_right >= WINNING_SCORE:
+            self.running = False
+            winner = "Player" if self.score_left >= WINNING_SCORE else "Computer"
+            self.canvas.create_text(WIDTH//2, HEIGHT//2 - 30, text=f"{winner} WINS!",
+                                    fill="yellow", font=("Arial", 32))
+            self.canvas.create_text(WIDTH//2, HEIGHT//2 + 30, text="Press 'r' to restart",
+                                    fill="white", font=("Arial", 16))
+            self.root.bind("r", self.restart_game)
+
+    def update_score(self):
+        self.canvas.itemconfig(self.score_text, text=f"{self.score_left} - {self.score_right}")
+
+    def restart_game(self, event=None):
+        self.score_left = 0
+        self.score_right = 0
+        self.update_score()
+        self.ball.reset()
+        self.running = True
+        self.canvas.delete("all")
+        self.score_text = self.canvas.create_text(WIDTH//2, 40, text="0 - 0",
+                                                  fill=TEXT_COLOR, font=("Arial", 24))
+        self.ball = Ball(self.canvas)
+        self.player = Paddle(self.canvas, 30, HEIGHT//2 - PADDLE_HEIGHT//2)
+        self.ai = Paddle(self.canvas, WIDTH - 30 - PADDLE_WIDTH, HEIGHT//2 - PADDLE_HEIGHT//2)
+        self.root.unbind("r")
+
+    def update_loop(self):
+        if not self.running:
+            self.root.after(50, self.update_loop)
+            return
+
+        self.player.move(self.player_dy)
+        self.ai_move()
+        self.ball.move()
+        self.check_collision()
+        self.check_score()
+
+        self.root.after(16, self.update_loop)
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    game = PongGame(root)
+    root.mainloop()
